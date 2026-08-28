@@ -1,0 +1,280 @@
+import pygame
+import random
+import sys
+
+pygame.init()
+
+# Настройки экрана
+WIDTH, HEIGHT = 800, 400
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Cactus Runner - Changing Biomes")
+clock = pygame.time.Clock()
+FPS = 60
+
+# --- Цветовые палитры биомов ---
+BIOMES = [
+    {
+        "name": "Пустыня",
+        "sky": (135, 206, 235),
+        "ground": (240, 220, 160),
+        "ground_line": (30, 130, 40),
+        "obstacle": (46, 139, 87),
+        "accent": (186, 85, 211)
+    },
+    {
+        "name": "Лес",
+        "sky": (170, 215, 140),
+        "ground": (34, 139, 34),
+        "ground_line": (0, 100, 0),
+        "obstacle": (101, 67, 33),
+        "accent": (34, 177, 76)
+    },
+    {
+        "name": "Зима",
+        "sky": (176, 196, 222),
+        "ground": (240, 248, 255),
+        "ground_line": (70, 130, 180),
+        "obstacle": (100, 149, 237),
+        "accent": (255, 255, 255)
+    },
+    {
+        "name": "Ночь",
+        "sky": (20, 24, 40),
+        "ground": (75, 0, 130),
+        "ground_line": (138, 43, 226),
+        "obstacle": (255, 20, 147),
+        "accent": (0, 255, 255)
+    }
+]
+
+# Цвета
+WHITE = (255, 255, 255)
+PINK = (255, 182, 193)
+BLACK = (0, 0, 0)
+RED = (220, 50, 50)
+GRAY = (180, 180, 180)
+SHIELD_BLUE = (0, 191, 255)
+
+# Игрок
+PLAYER_WIDTH = 40
+PLAYER_HEIGHT = 50
+player_x = 100
+player_y = HEIGHT - PLAYER_HEIGHT - 30
+player_vel_y = 0
+GRAVITY = 0.8
+JUMP_POWER = -14
+
+# Здоровье и Броня
+MAX_HP = 3
+hp = MAX_HP
+MAX_ARMOR = 3
+armor = 0
+invulnerable_timer = 0
+
+# Двойной прыжок
+is_grounded = True
+jump_count = 0
+
+# Препятствия и предметы
+OBSTACLE_WIDTH = 30
+obstacles = []
+obstacle_timer = 0
+obstacle_spawn_time = 90
+
+armors_on_screen = []
+armor_timer = 0
+armor_spawn_time = 300
+
+# Переменные
+base_speed = 6
+current_speed = base_speed
+score = 0
+font = pygame.font.SysFont("Arial", 22, bold=True)
+game_over = False
+
+def draw_rabbit(x, y, is_hit, current_armor):
+    body_color = GRAY if is_hit and (invulnerable_timer // 5) % 2 == 0 else WHITE
+    
+    if current_armor > 0 and not is_hit:
+        pygame.draw.circle(screen, SHIELD_BLUE, (x + 20, y + 20), 32, 3)
+    
+    pygame.draw.ellipse(screen, body_color, (x, y + 15, 35, 35))
+    pygame.draw.circle(screen, body_color, (x + 25, y + 15), 15)
+    pygame.draw.ellipse(screen, body_color, (x + 15, y - 10, 10, 25))
+    pygame.draw.ellipse(screen, PINK, (x + 17, y - 6, 6, 18))
+    pygame.draw.ellipse(screen, body_color, (x + 23, y - 12, 10, 25))
+    pygame.draw.ellipse(screen, PINK, (x + 25, y - 8, 6, 18))
+    pygame.draw.circle(screen, BLACK, (x + 32, y + 12), 3)
+    pygame.draw.circle(screen, PINK, (x + 38, y + 16), 2)
+    pygame.draw.circle(screen, body_color, (x - 2, y + 32), 6)
+
+def draw_obstacle(x, y, w, h, biome):
+    c_main = biome["obstacle"]
+    c_acc = biome["accent"]
+    
+    # Рисуем стилизованный объект биома
+    pygame.draw.rect(screen, c_main, (x + w//3, y, w//3, h), border_radius=6)
+    pygame.draw.rect(screen, c_main, (x, y + h//3, w//3, 8), border_radius=3)
+    pygame.draw.rect(screen, c_main, (x, y + h//3 - 12, 8, 15), border_radius=3)
+    pygame.draw.rect(screen, c_main, (x + (w//3)*2, y + h//2, w//3, 8), border_radius=3)
+    pygame.draw.rect(screen, c_main, (x + w - 8, y + h//2 - 12, 8, 15), border_radius=3)
+    pygame.draw.circle(screen, c_acc, (x + w//2, y - 2), 5)
+
+def draw_pickup_armor(x, y):
+    pygame.draw.polygon(screen, SHIELD_BLUE, [
+        (x + 12, y), (x + 24, y), (x + 24, y + 12), (x + 12, y + 24), (x, y + 12), (x, y)
+    ])
+    pygame.draw.polygon(screen, WHITE, [
+        (x + 12, y + 4), (x + 20, y + 4), (x + 20, y + 10), (x + 12, y + 18), (x + 4, y + 10), (x + 4, y + 4)
+    ], 2)
+
+def draw_ui(current_hp, current_armor, current_biome):
+    # HP
+    for i in range(MAX_HP):
+        x, y = 20 + i * 28, 50
+        color = RED if i < current_hp else GRAY
+        pygame.draw.circle(screen, color, (x, y), 5)
+        pygame.draw.circle(screen, color, (x + 6, y), 5)
+        pygame.draw.polygon(screen, color, [(x - 5, y + 2), (x + 11, y + 2), (x + 3, y + 10)])
+
+    # Armor
+    for i in range(MAX_ARMOR):
+        x, y = 130 + i * 25, 50
+        color = SHIELD_BLUE if i < current_armor else GRAY
+        pygame.draw.polygon(screen, color, [(x, y - 6), (x + 10, y - 6), (x + 10, y + 2), (x + 5, y + 8), (x, y + 2)])
+
+    # Название биома
+    text_color = WHITE if current_biome["name"] == "Ночь" else BLACK
+    biome_text = font.render(f"Биом: {current_biome['name']}", True, text_color)
+    screen.blit(biome_text, (WIDTH - 160, 15))
+
+def reset_game():
+    global player_y, player_vel_y, is_grounded, jump_count, hp, armor, invulnerable_timer
+    global obstacles, obstacle_timer, armors_on_screen, armor_timer, current_speed, score, game_over
+    
+    player_y = HEIGHT - PLAYER_HEIGHT - 30
+    player_vel_y = 0
+    is_grounded = True
+    jump_count = 0
+    hp = MAX_HP
+    armor = 0
+    invulnerable_timer = 0
+    obstacles = []
+    obstacle_timer = 0
+    armors_on_screen = []
+    armor_timer = 0
+    current_speed = base_speed
+    score = 0
+    game_over = False
+
+while True:
+    # Смена биомов каждые 500 очков
+    biome_index = ((score // 6) // 500) % len(BIOMES)
+    current_biome = BIOMES[biome_index]
+
+    screen.fill(current_biome["sky"])
+
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            pygame.quit()
+            sys.exit()
+            
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_SPACE:
+                if game_over:
+                    reset_game()
+                else:
+                    if jump_count < 2:
+                        player_vel_y = JUMP_POWER
+                        jump_count += 1
+                        is_grounded = False
+
+    if not game_over:
+        if invulnerable_timer > 0:
+            invulnerable_timer -= 1
+
+        # Физика
+        player_vel_y += GRAVITY
+        player_y += player_vel_y
+
+        ground_level = HEIGHT - PLAYER_HEIGHT - 30
+        if player_y >= ground_level:
+            player_y = ground_level
+            player_vel_y = 0
+            is_grounded = True
+            jump_count = 0
+
+        player_rect = pygame.Rect(player_x, player_y, PLAYER_WIDTH, PLAYER_HEIGHT)
+
+        # Препятствия
+        obstacle_timer += 1
+        if obstacle_timer >= obstacle_spawn_time:
+            obstacle_timer = random.randint(-20, 15)
+            h = random.randint(45, 65)
+            obstacles.append(pygame.Rect(WIDTH, HEIGHT - h - 30, OBSTACLE_WIDTH, h))
+
+        # Летающая броня
+        armor_timer += 1
+        if armor_timer >= armor_spawn_time:
+            armor_timer = random.randint(-60, 60)
+            fly_height = random.randint(180, 270)
+            armors_on_screen.append(pygame.Rect(WIDTH, fly_height, 24, 24))
+
+        # Скорость и счет
+        score += 1
+        current_speed = base_speed + (score // 300) * 0.5
+        obstacle_spawn_time = max(45, 90 - (score // 500) * 5)
+
+        # Коллизия препятствий
+        for obstacle in obstacles[:]:
+            obstacle.x -= current_speed
+            
+            if player_rect.colliderect(obstacle):
+                if invulnerable_timer == 0:
+                    if armor > 0:
+                        armor -= 1
+                    else:
+                        hp -= 1
+                    invulnerable_timer = 60
+                    if hp <= 0:
+                        game_over = True
+            
+            if obstacle.x < -OBSTACLE_WIDTH:
+                obstacles.remove(obstacle)
+
+        # Коллизия брони
+        for armor_item in armors_on_screen[:]:
+            armor_item.x -= current_speed
+            
+            if player_rect.colliderect(armor_item):
+                if armor < MAX_ARMOR:
+                    armor += 1
+                armors_on_screen.remove(armor_item)
+            elif armor_item.x < -30:
+                armors_on_screen.remove(armor_item)
+
+    # Отрисовка мира
+    pygame.draw.rect(screen, current_biome["ground"], (0, HEIGHT - 30, WIDTH, 30))
+    pygame.draw.line(screen, current_biome["ground_line"], (0, HEIGHT - 30), (WIDTH, HEIGHT - 30), 2)
+    
+    draw_rabbit(player_x, player_y, invulnerable_timer > 0, armor)
+    
+    for obstacle in obstacles:
+        draw_obstacle(obstacle.x, obstacle.y, obstacle.width, obstacle.height, current_biome)
+
+    for armor_item in armors_on_screen:
+        draw_pickup_armor(armor_item.x, armor_item.y)
+
+    # Интерфейс
+    text_color = WHITE if current_biome["name"] == "Ночь" else BLACK
+    score_text = font.render(f"Счёт: {score // 6}", True, text_color)
+    screen.blit(score_text, (20, 15))
+    draw_ui(hp, armor, current_biome)
+
+    if game_over:
+        over_text = font.render("ИГРА ОКОНЧЕНА! Нажмите SPACE для рестарта", True, RED)
+        text_rect = over_text.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+        screen.blit(over_text, text_rect)
+
+    pygame.display.flip()
+    clock.tick(FPS)
